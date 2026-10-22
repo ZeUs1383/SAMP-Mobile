@@ -17,32 +17,52 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
+
+      - name: Inspect repository
+        run: |
+          echo "Current directory:"
+          pwd
+          echo "Repository files:"
+          ls -la
+          echo "Gradle files:"
+          find . -maxdepth 4 \( \
+            -name gradlew -o \
+            -name settings.gradle -o \
+            -name settings.gradle.kts -o \
+            -name build.gradle -o \
+            -name build.gradle.kts \
+          \) -print
 
       - name: Locate Android SDK
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+
+      - name: Find sdkmanager
+        id: sdk
+        shell: bash
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" \
+            -type f -name sdkmanager 2>/dev/null | head -n 1)"
+
+          if [ -z "$SDKMANAGER" ]; then
+            echo "ERROR: sdkmanager was not found."
+            exit 1
+          fi
+
+          echo "SDKMANAGER=$SDKMANAGER" >> "$GITHUB_ENV"
+          echo "Found: $SDKMANAGER"
 
       - name: Accept Android licenses
         run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            echo "ERROR: sdkmanager was not found at $SDKMANAGER"
-            find "$ANDROID_HOME/cmdline-tools" -maxdepth 3 -name sdkmanager -type f
-            exit 1
-          fi
           yes | "$SDKMANAGER" --licenses || true
 
       - name: Install Android SDK packages
         run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           "$SDKMANAGER" --install \
             "platform-tools" \
             "platforms;android-34" \
@@ -50,23 +70,39 @@ jobs:
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
 
-      - name: Verify project files
+      - name: Locate project root
+        id: project
+        shell: bash
         run: |
-          test -f gradlew
-          test -f settings.gradle
-          test -f build.gradle
-          test -f app/build.gradle
-          test -f app/src/main/cpp/CMakeLists.txt
-          chmod +x gradlew
+          ROOT="."
+
+          if [ ! -f "$ROOT/gradlew" ]; then
+            FOUND="$(find . -maxdepth 5 -type f -name gradlew \
+              -not -path '*/.gradle/*' | head -n 1)"
+
+            if [ -z "$FOUND" ]; then
+              echo "ERROR: gradlew was not found in the checked-out repository."
+              exit 1
+            fi
+
+            ROOT="$(dirname "$FOUND")"
+          fi
+
+          ROOT="$(realpath "$ROOT")"
+          echo "ROOT=$ROOT" >> "$GITHUB_OUTPUT"
+          echo "Project root: $ROOT"
+          ls -la "$ROOT"
 
       - name: Build debug APK
+        working-directory: ${{ steps.project.outputs.ROOT }}
         run: |
+          chmod +x ./gradlew
           ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: SAMP-Android-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: '**/build/outputs/apk/debug/*.apk'
           if-no-files-found: error
           retention-days: 7
