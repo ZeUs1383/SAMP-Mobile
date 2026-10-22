@@ -24,9 +24,14 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android build tools
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android SDK packages
         run: |
-          sdkmanager "platforms;android-34" \
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
             "build-tools;34.0.0" \
             "ndk;26.2.11394342" \
             "cmake;3.22.1"
@@ -37,7 +42,7 @@ jobs:
           chmod +x gradlew
 
       - name: Build debug APK
-        run: ./gradlew --no-daemon assembleDebug
+        run: ./gradlew --no-daemon assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
